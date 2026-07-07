@@ -1,0 +1,10 @@
+streamlit
+langchain-groq
+pypdf
+langchain-text-splitters
+langchain-community
+langchain-huggingface
+sentence-transformers
+torch
+torchvision
+python-dotenv
