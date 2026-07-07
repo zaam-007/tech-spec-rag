@@ -46,7 +46,7 @@ def build_rag_pipeline(pdf_path):
     # Pass the secret directly to the model initialization
     llm = ChatGroq(
         groq_api_key=st.secrets["groq_api_key"], 
-        model_name="llama3-8b-8192"
+        model_name="llama-3.1-8b-instant"
     )
     
     # Define production-grade prompt templates
