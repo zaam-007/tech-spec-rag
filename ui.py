@@ -40,7 +40,14 @@ def build_rag_pipeline(pdf_path):
     retriever = vectorstore.as_retriever(search_kwargs={"k": 3})
     
     # Initialize the high-speed Groq LLM
-    llm = ChatGroq(model="llama-3.1-8b-instant", temperature=0)
+    import streamlit as st
+    from langchain_groq import ChatGroq
+
+    # Pass the secret directly to the model initialization
+    llm = ChatGroq(
+        groq_api_key=st.secrets["groq_api_key"], 
+        model_name="llama3-8b-8192"
+    )
     
     # Define production-grade prompt templates
     template = """You are a precise technical engineering assistant. 
