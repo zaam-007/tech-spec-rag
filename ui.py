@@ -37,7 +37,7 @@ def build_rag_pipeline(pdf_path):
 
     # 1. Save your uploaded file temporarily, then parse it straight to Markdown text
     with open("temp_spec.pdf", "wb") as f:
-    f.write(uploaded_file.getbuffer())
+        f.write(uploaded_file.getbuffer())
 
     # This one line extracts the entire PDF as clean Markdown text!
     md_text = pymupdf4llm.to_markdown("temp_spec.pdf")
@@ -47,10 +47,10 @@ def build_rag_pipeline(pdf_path):
 
     # 3. Split it using the structural separators
     text_splitter = RecursiveCharacterTextSplitter(
-    chunk_size=1000,
-    chunk_overlap=150,
-    separators=["\n## ", "\n### ", "\n\n", "\n", " "] 
-    # This forces it to try splitting at section boundaries first!
+        chunk_size=1000,
+        chunk_overlap=150,
+        separators=["\n## ", "\n### ", "\n\n", "\n", " "] 
+        # This forces it to try splitting at section boundaries first!
     )
     splits = text_splitter.split_documents(docs)
     
