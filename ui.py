@@ -33,10 +33,10 @@ def build_rag_pipeline(pdf_path):
     # 2. Wrap it in a LangChain Document object
     docs = [Document(page_content=md_text, metadata={"source": pdf_path})]
 
-    # 3. Split it using structural markdown boundaries
+    # UPDATE 1: Bump up the chunk size so entire tables and sections stay whole!
     text_splitter = RecursiveCharacterTextSplitter(
-        chunk_size=1000,
-        chunk_overlap=150,
+        chunk_size=3500,        # Increased from 1000
+        chunk_overlap=400,      # Increased from 150
         separators=["\n## ", "\n### ", "\n\n", "\n", " "] 
     )
     splits = text_splitter.split_documents(docs)
@@ -44,9 +44,11 @@ def build_rag_pipeline(pdf_path):
     # Generate vectors locally
     embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
     
-    # Index splits inside the Chroma database (Updated from 'chunks' to 'splits')
+    # Index splits inside the Chroma database
     vectorstore = Chroma.from_documents(splits, embeddings)
-    retriever = vectorstore.as_retriever(search_kwargs={"k": 3})
+
+    # UPDATE 2: Fetch more chunks (k=6) so the system grabs surrounding context
+    retriever = vectorstore.as_retriever(search_kwargs={"k": 6})  # Increased from k=3
     
     # Initialize the high-speed Groq LLM
     from langchain_groq import ChatGroq
