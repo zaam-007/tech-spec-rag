@@ -18,51 +18,37 @@ load_dotenv()
 st.set_page_config(page_title="Technical Assistant RAG", page_icon="⚙️", layout="wide")
 
 st.title("⚙️ Production Technical Spec RAG Assistant")
-st.write("Upload or reference a complex technical document and query it with absolute precision.")
+st.write("Query your technical document with absolute precision layout-aware formatting.")
 
 # 3. CRITICAL PERFORMANCE TRICK: Caching
-# Without this, Streamlit will re-read the PDF and re-embed the data on every single mouse click.
 @st.cache_resource
 def build_rag_pipeline(pdf_path):
-    # Load the PDF file
-    #loader = PyPDFLoader(pdf_path)
-    #raw_documents = loader.load()
-    
-    # Split into structured chunks
-    #text_splitter = RecursiveCharacterTextSplitter(chunk_size=600, chunk_overlap=100)
-    #chunks = text_splitter.split_documents(raw_documents)
     import pymupdf4llm
     from langchain_core.documents import Document
     from langchain_text_splitters import RecursiveCharacterTextSplitter
 
-    # 1. Save your uploaded file temporarily, then parse it straight to Markdown text
-    with open("temp_spec.pdf", "wb") as f:
-        f.write(uploaded_file.getbuffer())
-
-    # This one line extracts the entire PDF as clean Markdown text!
-    md_text = pymupdf4llm.to_markdown("temp_spec.pdf")
+    # 1. Parse the local PDF straight to structured Markdown text using the path variable
+    md_text = pymupdf4llm.to_markdown(pdf_path)
 
     # 2. Wrap it in a LangChain Document object
-    docs = [Document(page_content=md_text, metadata={"source": "uploaded_spec.pdf"})]
+    docs = [Document(page_content=md_text, metadata={"source": pdf_path})]
 
-    # 3. Split it using the structural separators
+    # 3. Split it using structural markdown boundaries
     text_splitter = RecursiveCharacterTextSplitter(
         chunk_size=1000,
         chunk_overlap=150,
         separators=["\n## ", "\n### ", "\n\n", "\n", " "] 
-        # This forces it to try splitting at section boundaries first!
     )
     splits = text_splitter.split_documents(docs)
     
     # Generate vectors locally
     embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
     
-    # Index chunks inside the Chroma database
-    vectorstore = Chroma.from_documents(chunks, embeddings)
+    # Index splits inside the Chroma database (Updated from 'chunks' to 'splits')
+    vectorstore = Chroma.from_documents(splits, embeddings)
     retriever = vectorstore.as_retriever(search_kwargs={"k": 3})
     
     # Initialize the high-speed Groq LLM
-    import streamlit as st
     from langchain_groq import ChatGroq
 
     # Pass the secret directly to the model initialization
@@ -118,7 +104,6 @@ if user_query:
     if user_query.strip() == "":
         st.warning("Please enter a valid question.")
     else:
-        # Create a visually pleasing loading status container
         with st.spinner("Searching database coordinates and generating answer..."):
             try:
                 response = rag_engine.invoke(user_query)
