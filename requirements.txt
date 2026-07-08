@@ -10,3 +10,4 @@ torchvision
 python-dotenv
 chromadb
 pymupdf4llm
+flashrank
