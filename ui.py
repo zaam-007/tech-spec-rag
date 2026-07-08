@@ -46,9 +46,22 @@ def build_rag_pipeline(pdf_path):
     
     # Index splits inside the Chroma database
     vectorstore = Chroma.from_documents(splits, embeddings)
+    base_retriever = vectorstore.as_retriever(search_kwargs={"k": 10}) # Fetch a few more chunks initially
+    
+    # 1. Import FlashRank Contextual Compressor
+    from langchain.retrievers import ContextualCompressionRetriever
+    from langchain.retrievers.document_compressors import FlashrankRerank
 
-    # UPDATE 2: Fetch more chunks (k=6) so the system grabs surrounding context
-    retriever = vectorstore.as_retriever(search_kwargs={"k": 6})  # Increased from k=3
+    # 2. Initialize the FlashRank Re-ranker engine (ultra-lightweight, runs locally)
+    compressor = FlashrankRerank(model="ms-marco-MiniLM-L-12-v2")
+    
+    # 3. Wrap your base retriever with the re-ranker compressor
+    # This will take the top 10 chunks, re-rank them, and keep only the top 4 most precise ones
+    compressor.top_n = 4
+    retriever = ContextualCompressionRetriever(
+        base_compressor=compressor, 
+        base_retriever=base_retriever
+    )
     
     # Initialize the high-speed Groq LLM
     from langchain_groq import ChatGroq
@@ -72,7 +85,7 @@ def build_rag_pipeline(pdf_path):
     Answer:"""
     prompt = ChatPromptTemplate.from_template(template)
     
-    # Assemble the engine chain
+    # Assemble the engine chain (This stays exactly the same!)
     chain = (
         {"context": retriever, "question": RunnablePassthrough()}
         | prompt
@@ -80,6 +93,7 @@ def build_rag_pipeline(pdf_path):
         | StrOutputParser()
     )
     return chain
+    
 
 # 4. Check if your test PDF exists
 target_pdf = "document.pdf"
