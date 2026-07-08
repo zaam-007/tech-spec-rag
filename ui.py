@@ -25,12 +25,34 @@ st.write("Upload or reference a complex technical document and query it with abs
 @st.cache_resource
 def build_rag_pipeline(pdf_path):
     # Load the PDF file
-    loader = PyPDFLoader(pdf_path)
-    raw_documents = loader.load()
+    #loader = PyPDFLoader(pdf_path)
+    #raw_documents = loader.load()
     
     # Split into structured chunks
-    text_splitter = RecursiveCharacterTextSplitter(chunk_size=600, chunk_overlap=100)
-    chunks = text_splitter.split_documents(raw_documents)
+    #text_splitter = RecursiveCharacterTextSplitter(chunk_size=600, chunk_overlap=100)
+    #chunks = text_splitter.split_documents(raw_documents)
+    import pymupdf4llm
+    from langchain_core.documents import Document
+    from langchain_text_splitters import RecursiveCharacterTextSplitter
+
+    # 1. Save your uploaded file temporarily, then parse it straight to Markdown text
+    with open("temp_spec.pdf", "wb") as f:
+    f.write(uploaded_file.getbuffer())
+
+    # This one line extracts the entire PDF as clean Markdown text!
+    md_text = pymupdf4llm.to_markdown("temp_spec.pdf")
+
+    # 2. Wrap it in a LangChain Document object
+    docs = [Document(page_content=md_text, metadata={"source": "uploaded_spec.pdf"})]
+
+    # 3. Split it using the structural separators
+    text_splitter = RecursiveCharacterTextSplitter(
+    chunk_size=1000,
+    chunk_overlap=150,
+    separators=["\n## ", "\n### ", "\n\n", "\n", " "] 
+    # This forces it to try splitting at section boundaries first!
+    )
+    splits = text_splitter.split_documents(docs)
     
     # Generate vectors locally
     embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
