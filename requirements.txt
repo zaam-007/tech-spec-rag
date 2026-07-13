@@ -13,3 +13,4 @@ pymupdf4llm
 flashrank
 duckduckgo-search
 langchain
+langchain-retrievers
