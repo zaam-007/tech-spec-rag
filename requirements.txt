@@ -12,4 +12,4 @@ chromadb
 pymupdf4llm
 flashrank
 duckduckgo-search
-
+langchain
