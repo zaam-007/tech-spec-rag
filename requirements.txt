@@ -1,4 +1,5 @@
 streamlit
+langchain
 langchain-groq
 pypdf
 langchain-text-splitters
@@ -10,7 +11,5 @@ torchvision
 python-dotenv
 chromadb
 pymupdf4llm
+pymupdf
 flashrank
-duckduckgo-search
-langchain
-langchain-retrievers
