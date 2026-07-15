@@ -29,7 +29,7 @@ def build_agentic_pipeline(pdf_path):
     from langchain_core.documents import Document
     from langchain_text_splitters import RecursiveCharacterTextSplitter
     # FIX: Correct import paths for retrievers and compressors
-    from langchain.retrievers import ContextualCompressionRetriever
+    from langchain_classic.retrievers import ContextualCompressionRetriever
     from langchain_community.document_compressors import FlashrankRerank
 
     # 1. Parse local PDF to structured Markdown
