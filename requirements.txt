@@ -13,4 +13,5 @@ chromadb
 pymupdf4llm
 pymupdf
 flashrank
-langchain<1.0.0
+langchain
+langchain-classic
