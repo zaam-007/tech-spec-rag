@@ -9,7 +9,8 @@ from langchain_community.vectorstores import Chroma
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.output_parsers import StrOutputParser
-from langchain_classic.agents import AgentExecutor, create_tool_calling_agent
+# FIX: Standardized imports from langchain.agents
+from langchain.agents import AgentExecutor, create_tool_calling_agent
 from langchain_community.tools import DuckDuckGoSearchRun
 from langchain_core.tools import tool
 
@@ -28,8 +29,9 @@ def build_agentic_pipeline(pdf_path):
     import pymupdf4llm
     from langchain_core.documents import Document
     from langchain_text_splitters import RecursiveCharacterTextSplitter
+    # FIX: Correct import paths for retrievers and compressors
     from langchain.retrievers import ContextualCompressionRetriever
-    from langchain.retrievers.document_compressors import FlashrankRerank
+    from langchain_community.document_compressors import FlashrankRerank
 
     # 1. Parse local PDF to structured Markdown
     md_text = pymupdf4llm.to_markdown(pdf_path)
@@ -57,8 +59,13 @@ def build_agentic_pipeline(pdf_path):
     )
     
     # Initialize high-speed Groq LLM
+    # Note: Ensure you have "groq_api_key" in your .env or streamlit secrets
+    api_key = os.getenv("GROQ_API_KEY") or st.secrets.get("groq_api_key")
+    if not api_key:
+        raise ValueError("Groq API Key not found! Please set it in your .env file or Streamlit secrets.")
+
     llm = ChatGroq(
-        groq_api_key=st.secrets["groq_api_key"], 
+        groq_api_key=api_key, 
         model_name="llama-3.1-8b-instant"
     )
 
@@ -70,11 +77,17 @@ def build_agentic_pipeline(pdf_path):
         retrieved_docs = compressed_retriever.invoke(query)
         return "\n\n".join([d.page_content for d in retrieved_docs])
 
-    # Initialize the external web search tool
-    web_search_tool = DuckDuckGoSearchRun()
+    # Initialize the external web search tool and wrap it explicitly for clear schema matching
+    web_search = DuckDuckGoSearchRun()
+    
+    @tool
+    def duckduckgo_search(query: str) -> str:
+        """Useful for searching the internet to get real-time information, 
+        industry definitions, or online technical documentation."""
+        return web_search.run(query)
     
     # Register the toolbox
-    tools = [search_pdf_specifications, web_search_tool]
+    tools = [search_pdf_specifications, duckduckgo_search]
 
     # Create the agent systemic router prompt
     prompt = ChatPromptTemplate.from_messages([
@@ -85,6 +98,7 @@ def build_agentic_pipeline(pdf_path):
             "seamlessly use the `duckduckgo_search` tool to look up relevant technical concepts, definitions, or standard conventions online.\n"
             "Be descriptive, accurate, and do not make up fake metrics."
         )),
+        # MessagesPlaceholder using agent_scratchpad is standard for tool calling agents
         MessagesPlaceholder(variable_name="chat_history"),
         ("human", "{input}"),
         MessagesPlaceholder(variable_name="agent_scratchpad"),
