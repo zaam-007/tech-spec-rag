@@ -12,7 +12,7 @@ from langchain_core.output_parsers import StrOutputParser
 from langchain_classic.agents import AgentExecutor, create_tool_calling_agent
 from langchain_community.tools import DuckDuckGoSearchRun
 from langchain_core.tools import tool
-from duckduckgo_search import DDGS
+
 
 # 1. Load your secret API keys
 load_dotenv()
