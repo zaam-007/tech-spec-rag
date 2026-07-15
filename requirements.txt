@@ -15,4 +15,5 @@ pymupdf
 flashrank
 langchain
 langchain-classic
-pip install duckduckgo-search
+duckduckgo-search
+ddgs
