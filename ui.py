@@ -12,6 +12,7 @@ from langchain_core.output_parsers import StrOutputParser
 from langchain_classic.agents import AgentExecutor, create_tool_calling_agent
 from langchain_community.tools import DuckDuckGoSearchRun
 from langchain_core.tools import tool
+from langchain_core.messages import HumanMessage, AIMessage
 
 # 1. Load security keys
 load_dotenv()
@@ -20,7 +21,7 @@ load_dotenv()
 st.set_page_config(page_title="Technical Assistant RAG", page_icon="⚙️", layout="wide")
 
 st.title("⚙️ Production Technical Spec RAG Assistant")
-st.write("Query the technical document with real-time LLM-as-a-Judge performance analytics.")
+st.write("An intelligent engineering agent equipped with layout-aware memory and live evaluation capabilities.")
 
 # 3. Cache the Core Agent and Retrievers
 @st.cache_resource
@@ -69,7 +70,6 @@ def build_agentic_pipeline(pdf_path):
         """Useful when you need to answer technical questions directly from the 
         uploaded local engineering specification PDF documents."""
         retrieved_docs = compressed_retriever.invoke(query)
-        # Store context in session state momentarily for Day 7 evaluation metrics
         st.session_state.last_retrieved_context = "\n\n".join([d.page_content for d in retrieved_docs])
         return st.session_state.last_retrieved_context
 
@@ -89,6 +89,7 @@ def build_agentic_pipeline(pdf_path):
             "First, ALWAYS use the `search_pdf_specifications` tool to search the provided document for answers.\n"
             "If the document context completely lacks the required information, "
             "seamlessly use the `duckduckgo_search` tool to look up technical concepts online.\n"
+            "Analyze the conversation history to handle context-driven follow-up questions accurately.\n"
             "Be descriptive, accurate, and do not make up fake metrics."
         )),
         MessagesPlaceholder(variable_name="chat_history"),
@@ -103,8 +104,7 @@ def build_agentic_pipeline(pdf_path):
 def run_llm_judge(query, response, context):
     eval_llm = ChatGroq(groq_api_key=st.secrets.get("groq_api_key") or os.getenv("GROQ_API_KEY"), model_name="llama-3.1-8b-instant")
     
-    # FIX: If context is massive, safely trim it to avoid hitting token limits
-    # 8000 characters is roughly 2000 tokens—plenty for a judge to read accurately!
+    # Truncate to prevent token limit issues
     safe_context = context[:8000] + "\n...[Context truncated for token limits]..." if len(context) > 8000 else context
 
     eval_template = """You are an independent QA quality controller evaluating a technical RAG system.
@@ -125,8 +125,8 @@ def run_llm_judge(query, response, context):
     """
     eval_prompt = ChatPromptTemplate.from_template(eval_template)
     eval_chain = eval_prompt | eval_llm | StrOutputParser()
-    return eval_chain.invoke({"query": query, "response": response, "context": safe_context})    
-    
+    return eval_chain.invoke({"query": query, "response": response, "context": safe_context})
+
 # 5. Pipeline Initialization
 target_pdf = "document.pdf"
 
@@ -134,10 +134,11 @@ if not os.path.exists(target_pdf):
     st.error(f"❌ '{target_pdf}' not found! Please drop your technical manual PDF into your project folder and rename it to '{target_pdf}'.")
     st.stop()
 
+# Initialize persistent memory structures
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
 if "last_retrieved_context" not in st.session_state:
-    st.session_state.last_retrieved_context = "No document context called yet (Web Fallback applied)."
+    st.session_state.last_retrieved_context = "No document context called yet."
 
 try:
     agent_engine = build_agentic_pipeline(target_pdf)
@@ -145,46 +146,64 @@ except Exception as e:
     st.error(f"Failed to compile RAG pipeline: {e}")
     st.stop()
 
-# 6. Build the Visual UI Layout Components
-st.markdown("---")
-col1, col2 = st.columns([3, 1])
-
-with col2:
+# 6. Build Sidebar Controls
+with st.sidebar:
     st.markdown("### 📊 Judge Controls")
-    enable_eval = st.checkbox("Enable LLM-as-a-Judge", value=True, help="Runs an independent automated evaluation step on the generated answer.")
+    enable_eval = st.checkbox("Enable LLM-as-a-Judge", value=True, help="Runs an independent automated evaluation step on the latest response.")
+    if st.button("🗑️ Clear Chat History"):
+        st.session_state.chat_history = []
+        st.rerun()
 
-with col1:
-    user_query = st.text_input("💬 Ask a technical specification question from the document:")
+# 7. Render Historical Chat Feed
+for role, message in st.session_state.chat_history:
+    if role == "human":
+        with st.chat_message("user"):
+            st.markdown(message)
+    elif role == "ai":
+        with st.chat_message("assistant"):
+            st.markdown(message)
 
-# 7. Execution Logic Lifecycle
+# 8. Chat Input and Execution Lifecycle
+user_query = st.chat_input("Ask a technical specification question...")
+
 if user_query:
-    if user_query.strip() == "":
-        st.warning("Please enter a valid question.")
-    else:
-        # Reset context tracker before call
-        st.session_state.last_retrieved_context = "No document context called yet (Web Fallback applied)."
+    # Immediately render user query on screen
+    with st.chat_message("user"):
+        st.markdown(user_query)
         
-        with st.spinner("Agent running reasoning loops and tool execution routes..."):
+    st.session_state.last_retrieved_context = "No document context called yet (Web Fallback applied)."
+    
+    with st.chat_message("assistant"):
+        message_placeholder = st.empty()
+        with st.spinner("Thinking..."):
             try:
+                # Format session state messages into LangChain baseline objects for the prompt template
+                langchain_history = []
+                for role, text in st.session_state.chat_history:
+                    if role == "human":
+                        langchain_history.append(HumanMessage(content=text))
+                    elif role == "ai":
+                        langchain_history.append(AIMessage(content=text))
+
+                # Execute tracking run
                 response = agent_engine.invoke({
                     "input": user_query,
-                    "chat_history": st.session_state.chat_history
+                    "chat_history": langchain_history
                 })
                 
                 output_text = response["output"]
-                st.session_state.chat_history.append(("human", user_query))
-                st.session_state.chat_history.append(("ai", output_text))
+                message_placeholder.markdown(output_text)
                 
-                st.markdown("### 🤖 Engine Output:")
-                st.info(output_text)
-                
-                # Execution of the Judge Evaluation Component
+                # Run the Judge metric audit directly inline if checked
                 if enable_eval:
                     st.markdown("---")
-                    st.markdown("### ⚖️ Independent LLM-as-a-Judge Audit Report")
-                    with st.spinner("Running statistical alignment evaluations..."):
-                        score_card = run_llm_judge(user_query, output_text, st.session_state.last_retrieved_context)
-                        st.code(score_card, language="text")
-                        
+                    st.markdown("**⚖️ Real-time QA Evaluation:**")
+                    score_card = run_llm_judge(user_query, output_text, st.session_state.last_retrieved_context)
+                    st.code(score_card, language="text")
+
+                # Save history parameters
+                st.session_state.chat_history.append(("human", user_query))
+                st.session_state.chat_history.append(("ai", output_text))
+
             except Exception as e:
-                st.error(f"An error occurred during generation: {e}")
+                st.error(f"An error occurred: {e}")
