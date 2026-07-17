@@ -103,6 +103,10 @@ def build_agentic_pipeline(pdf_path):
 def run_llm_judge(query, response, context):
     eval_llm = ChatGroq(groq_api_key=st.secrets.get("groq_api_key") or os.getenv("GROQ_API_KEY"), model_name="llama-3.1-8b-instant")
     
+    # FIX: If context is massive, safely trim it to avoid hitting token limits
+    # 8000 characters is roughly 2000 tokens—plenty for a judge to read accurately!
+    safe_context = context[:8000] + "\n...[Context truncated for token limits]..." if len(context) > 8000 else context
+
     eval_template = """You are an independent QA quality controller evaluating a technical RAG system.
     Evaluate the System Response based on the User Query and retrieved Context.
     
@@ -121,8 +125,8 @@ def run_llm_judge(query, response, context):
     """
     eval_prompt = ChatPromptTemplate.from_template(eval_template)
     eval_chain = eval_prompt | eval_llm | StrOutputParser()
-    return eval_chain.invoke({"query": query, "response": response, "context": context})
-
+    return eval_chain.invoke({"query": query, "response": response, "context": safe_context})    
+    
 # 5. Pipeline Initialization
 target_pdf = "document.pdf"
 
