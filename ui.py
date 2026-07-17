@@ -20,7 +20,7 @@ load_dotenv()
 st.set_page_config(page_title="Technical Assistant RAG", page_icon="⚙️", layout="wide")
 
 st.title("⚙️ Production Technical Spec RAG Assistant")
-st.write("Query your technical document with real-time LLM-as-a-Judge performance analytics.")
+st.write("Query the technical document with real-time LLM-as-a-Judge performance analytics.")
 
 # 3. Cache the Core Agent and Retrievers
 @st.cache_resource
