@@ -179,7 +179,9 @@ if user_query:
             try:
                 # Format session state messages into LangChain baseline objects for the prompt template
                 langchain_history = []
-                for role, text in st.session_state.chat_history:
+                #keeping only 3 rounds of back and forth dialogue or chat history to stay within groq's 6k token limit
+                recent_history = st.session_state.chat_history[-6:]
+                for role, text in recent_history:
                     if role == "human":
                         langchain_history.append(HumanMessage(content=text))
                     elif role == "ai":
