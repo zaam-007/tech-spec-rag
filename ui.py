@@ -22,6 +22,31 @@ st.set_page_config(page_title="Technical Assistant RAG", page_icon="⚙️", lay
 
 st.title("⚙️ Production Technical Spec RAG Assistant")
 st.write("An intelligent engineering agent equipped with layout-aware memory and live evaluation capabilities.")
+import re
+
+def sanitize_and_check_input(query: str) -> tuple[bool, str]:
+    """
+    Validates user input against prompt injection attempts and empty inputs.
+    Returns (is_valid, error_message_or_clean_query).
+    """
+    clean_query = query.strip()
+    if not clean_query:
+        return False, "Please enter a valid technical question."
+    
+    # Common prompt injection patterns
+    injection_patterns = [
+        r"ignore (all )?previous instructions",
+        r"disregard the above",
+        r"system prompt",
+        r"you are now an? unrestricted",
+        r"override safety"
+    ]
+    
+    for pattern in injection_patterns:
+        if re.search(pattern, clean_query, re.IGNORECASE):
+            return False, "⚠️ Prompt manipulation pattern detected. Please rephrase your technical question."
+            
+    return True, clean_query
 
 # 3. Cache the Core Agent and Retrievers
 @st.cache_resource
@@ -154,15 +179,46 @@ with st.sidebar:
         st.session_state.chat_history = []
         st.rerun()
 
-# 7. Render Historical Chat Feed
-for role, message in st.session_state.chat_history:
-    if role == "human":
-        with st.chat_message("user"):
-            st.markdown(message)
-    elif role == "ai":
-        with st.chat_message("assistant"):
-            st.markdown(message)
+# 7. Execute the request with Guardrails
+if user_query:
+    is_valid, result = sanitize_and_check_input(user_query)
+    
+    if not is_valid:
+        st.warning(result)
+    else:
+        with st.spinner("Agent evaluating guardrails and executing tools..."):
+            try:
+                # Format session state messages with memory pruning [-6:]
+                recent_history = st.session_state.chat_history[-6:]
+                langchain_history = []
+                for role, text in recent_history:
+                    if role == "human":
+                        langchain_history.append(("human", text))
+                    elif role == "ai":
+                        langchain_history.append(("ai", text))
 
+                response = agent_engine.invoke({
+                    "input": result,
+                    "chat_history": langchain_history
+                })
+                
+                output_text = response["output"]
+                
+                # Update memory
+                st.session_state.chat_history.append(("human", result))
+                st.session_state.chat_history.append(("ai", output_text))
+                
+                st.markdown("### 🤖 Engine Output:")
+                st.info(output_text)
+
+            except Exception as e:
+                err_msg = str(e)
+                if "rate_limit_exceeded" in err_msg or "413" in err_msg:
+                    st.error("⏳ **Rate Limit / Token Cap Exceeded**: The request payload exceeded Groq's Tokens Per Minute (TPM) limit. Please clear chat history or wait 60 seconds.")
+                elif "APIKey" in err_msg or "authentication" in err_msg.lower():
+                    st.error("🔑 **Authentication Error**: Groq API Key is invalid or missing. Check your `.env` or Streamlit secrets.")
+                else:
+                    st.error(f"❌ **System Error**: {err_msg}")
 # 8. Chat Input and Execution Lifecycle
 user_query = st.chat_input("Ask a technical specification question...")
 
