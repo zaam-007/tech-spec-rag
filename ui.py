@@ -114,10 +114,11 @@ def build_agentic_pipeline(pdf_path):
     prompt = ChatPromptTemplate.from_messages([
         ("system", (
             "You are a precise technical engineering assistant.\n"
-            "First, ALWAYS use the `search_pdf_specifications` tool to search the provided document for answers.\n"
+            "A technical specification document (`document.pdf`) is ALREADY uploaded, chunked, and indexed in your vector store.\n"
+            "ALWAYS execute the `search_pdf_specifications` tool to look up technical details in this indexed document before answering.\n"
+            "Do NOT output raw function syntax like '<function=...>'—execute tools directly.\n"
             "If the document context completely lacks the required information, "
-            "seamlessly use the `duckduckgo_search` tool to look up technical concepts online.\n"
-            "Analyze the conversation history to handle context-driven follow-up questions accurately.\n"
+            "seamlessly call the `duckduckgo_search` tool to look up technical concepts online.\n"
             "Be descriptive, accurate, and do not make up fake metrics."
         )),
         MessagesPlaceholder(variable_name="chat_history"),
