@@ -24,8 +24,7 @@ st.set_page_config(page_title="Technical Assistant RAG", page_icon="⚙️", lay
 st.title("⚙️ Production Technical Spec RAG Assistant")
 st.write("An intelligent engineering agent equipped with layout-aware memory, guardrails, and live evaluation capabilities.")
 
-# =====================================================================
-# 🛡️ DAY 9 GUARDRAIL: INPUT SANITIZER & PROMPT INJECTION DEFENSE
+
 # =====================================================================
 def sanitize_and_check_input(query: str) -> tuple[bool, str]:
     """
@@ -90,7 +89,7 @@ def build_agentic_pipeline(pdf_path):
     if not api_key:
         raise ValueError("Groq API Key not found!")
 
-    llm = ChatGroq(groq_api_key=api_key, model_name="llama-3.1-8b-instant")
+    llm = ChatGroq(groq_api_key=api_key, model_name="llama-3.3-70b-versatile")
 
     # Wrap retrievers inside a tool reference layer
     @tool
