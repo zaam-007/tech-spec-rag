@@ -52,6 +52,9 @@ def sanitize_and_check_input(query: str) -> tuple[bool, str]:
 
 # 3. Cache the Core Agent and Retrievers
 @st.cache_resource
+@st.cache_resource
+def load_embeddings():
+    return HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
 def build_agentic_pipeline(pdf_path):
     import pymupdf4llm
     from langchain_core.documents import Document
