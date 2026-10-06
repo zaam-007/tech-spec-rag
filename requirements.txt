@@ -7,7 +7,6 @@ langchain-community
 langchain-huggingface
 sentence-transformers
 torch
-torchvision
 python-dotenv
 chromadb
 pymupdf4llm
