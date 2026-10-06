@@ -6,7 +6,6 @@ langchain-text-splitters
 langchain-community
 langchain-huggingface
 sentence-transformers
-torch
 python-dotenv
 chromadb
 pymupdf4llm
