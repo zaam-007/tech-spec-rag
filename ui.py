@@ -56,14 +56,16 @@ def build_agentic_pipeline(pdf_path):
     import pymupdf4llm
     from langchain_core.documents import Document
     from langchain_text_splitters import RecursiveCharacterTextSplitter
+    from langchain_community.vectorstores import Chroma
+    from langchain_community.embeddings import FastEmbedEmbeddings
     from langchain_classic.retrievers import ContextualCompressionRetriever
     from langchain_community.document_compressors import FlashrankRerank
 
-    # Parse local PDF to structured Markdown
+    # 1. Parse local PDF to structured Markdown
     md_text = pymupdf4llm.to_markdown(pdf_path)
     docs = [Document(page_content=md_text, metadata={"source": pdf_path})]
 
-    # Split using layout boundaries
+    # 2. Split text into logical chunks
     text_splitter = RecursiveCharacterTextSplitter(
         chunk_size=3500,        
         chunk_overlap=400,      
@@ -71,12 +73,17 @@ def build_agentic_pipeline(pdf_path):
     )
     splits = text_splitter.split_documents(docs)
     
-    # Vector store setup
-    embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
-    vectorstore = Chroma.from_documents(splits, embeddings)
+    # 3. FAST EMBEDDINGS (No PyTorch, ONNX engine)
+    embeddings = FastEmbedEmbeddings(model_name="BAAI/bge-small-en-v1.5")
+
+    # 4. IN-MEMORY CHROMADB (Fixes the infinite loading / SQLite thread lock issue)
+    vectorstore = Chroma.from_documents(
+        documents=splits, 
+        embedding=embeddings
+    )
     base_retriever = vectorstore.as_retriever(search_kwargs={"k": 10})
     
-    # Reranking compressor configuration
+    # 5. Reranking compressor configuration
     compressor = FlashrankRerank(model="ms-marco-MiniLM-L-12-v2")
     compressor.top_n = 4
     compressed_retriever = ContextualCompressionRetriever(
