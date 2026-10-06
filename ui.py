@@ -1,7 +1,7 @@
 import os
 import re
-from dotenv import load_dotenv
 import streamlit as st
+from dotenv import load_dotenv
 
 from langchain_groq import ChatGroq
 from langchain_text_splitters import RecursiveCharacterTextSplitter
@@ -24,17 +24,12 @@ st.title("⚙️ Production Technical Spec RAG Assistant")
 st.write("An intelligent engineering agent equipped with layout-aware memory, guardrails, and live evaluation capabilities.")
 
 
-# =====================================================================
+# Security and Guardrails Check
 def sanitize_and_check_input(query: str) -> tuple[bool, str]:
-    """
-    Validates user input against prompt injection attempts and empty inputs.
-    Returns (is_valid, error_message_or_clean_query).
-    """
     clean_query = query.strip()
     if not clean_query:
         return False, "Please enter a valid technical question."
     
-    # Common prompt injection patterns
     injection_patterns = [
         r"ignore (all )?previous instructions",
         r"disregard the above",
@@ -50,19 +45,25 @@ def sanitize_and_check_input(query: str) -> tuple[bool, str]:
     return True, clean_query
 
 
-# 3. Cache the Core Agent and Retrievers
-@st.cache_resource
+# 3. Cached Embeddings Initialization (Prevents HuggingFace model download hangs)
+@st.cache_resource(show_spinner=False)
+def get_embedding_model():
+    return FastEmbedEmbeddings(model_name="BAAI/bge-small-en-v1.5")
+
+
+# 4. Cached Agent & Index Pipeline
+@st.cache_resource(show_spinner=False)
 def build_agentic_pipeline(pdf_path):
     import pymupdf4llm
     from langchain_core.documents import Document
     from langchain_classic.retrievers import ContextualCompressionRetriever
     from langchain_community.document_compressors import FlashrankRerank
 
-    # 1. Parse local PDF to structured Markdown
+    # Load layout-aware PDF markdown
     md_text = pymupdf4llm.to_markdown(pdf_path)
     docs = [Document(page_content=md_text, metadata={"source": pdf_path})]
 
-    # 2. Split text into logical chunks
+    # Split documents into chunks
     text_splitter = RecursiveCharacterTextSplitter(
         chunk_size=3500,        
         chunk_overlap=400,      
@@ -70,17 +71,15 @@ def build_agentic_pipeline(pdf_path):
     )
     splits = text_splitter.split_documents(docs)
     
-    # 3. Fast ONNX Embeddings (No PyTorch runtime required)
-    embeddings = FastEmbedEmbeddings(model_name="BAAI/bge-small-en-v1.5")
-
-    # 4. In-Memory Chroma Vector Store (Prevents SQLite thread locking in Streamlit)
+    # Fast Embeddings & VectorStore
+    embeddings = get_embedding_model()
     vectorstore = Chroma.from_documents(
         documents=splits, 
         embedding=embeddings
     )
     base_retriever = vectorstore.as_retriever(search_kwargs={"k": 10})
     
-    # 5. Reranking compressor configuration
+    # FlashRank Reranker Setup
     compressor = FlashrankRerank(model="ms-marco-MiniLM-L-12-v2")
     compressor.top_n = 4
     compressed_retriever = ContextualCompressionRetriever(
@@ -91,11 +90,11 @@ def build_agentic_pipeline(pdf_path):
     # Initialize Core LLM
     api_key = os.getenv("GROQ_API_KEY") or st.secrets.get("groq_api_key")
     if not api_key:
-        raise ValueError("Groq API Key not found!")
+        raise ValueError("Groq API Key not found in environment or secrets!")
 
     llm = ChatGroq(groq_api_key=api_key, model_name="llama-3.3-70b-versatile")
 
-    # Wrap retrievers inside a tool reference layer
+    # Define Agent Tools
     @tool
     def search_pdf_specifications(query: str) -> str:
         """Useful when you need to answer technical questions directly from the 
@@ -133,13 +132,12 @@ def build_agentic_pipeline(pdf_path):
     return AgentExecutor(agent=agent, tools=tools, verbose=True)
 
 
-# 4. Helper Function: Run Real-time LLM Evaluation
+# 5. Real-time LLM QA Judge Function
 def run_llm_judge(query, response, context):
     eval_api_key = os.getenv("GROQ_API_KEY") or st.secrets.get("groq_api_key")
     eval_llm = ChatGroq(groq_api_key=eval_api_key, model_name="llama-3.3-70b-versatile")
     
-    # Truncate context to prevent token limit overflows
-    safe_context = context[:8000] + "\n...[Context truncated for token limits]..." if len(context) > 8000 else context
+    safe_context = context[:8000] + "\n...[Context truncated]..." if len(context) > 8000 else context
 
     eval_template = """You are an independent QA quality controller evaluating a technical RAG system.
     Evaluate the System Response based on the User Query and retrieved Context.
@@ -162,34 +160,39 @@ def run_llm_judge(query, response, context):
     return eval_chain.invoke({"query": query, "response": response, "context": safe_context})
 
 
-# 5. Pipeline Initialization
+# 6. Initialize State and Load Pipeline safely
 target_pdf = "document.pdf"
 
 if not os.path.exists(target_pdf):
-    st.error(f"❌ '{target_pdf}' not found! Please drop your technical manual PDF into your project folder and rename it to '{target_pdf}'.")
+    st.error(f"❌ '{target_pdf}' not found! Please ensure your PDF file is renamed to '{target_pdf}' in the project root.")
     st.stop()
 
-# Initialize persistent memory structures
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
 if "last_retrieved_context" not in st.session_state:
     st.session_state.last_retrieved_context = "No document context called yet."
 
-try:
-    agent_engine = build_agentic_pipeline(target_pdf)
-except Exception as e:
-    st.error(f"Failed to compile RAG pipeline: {e}")
-    st.stop()
+# Progress feedback during initialization to prevent infinite spinning illusion
+if "agent_engine" not in st.session_state:
+    with st.status("🚀 Initializing Vector Index & Agent Pipeline...", expanded=True) as status:
+        st.write("📥 Loading FastEmbed ONNX models...")
+        _ = get_embedding_model()
+        st.write("📄 Chunking document and populating Chroma vector DB...")
+        st.session_state.agent_engine = build_agentic_pipeline(target_pdf)
+        status.update(label="✅ System Ready!", state="complete", expanded=False)
 
-# 6. Build Sidebar Controls
+agent_engine = st.session_state.agent_engine
+
+
+# 7. Sidebar Controls
 with st.sidebar:
     st.markdown("### 📊 Judge Controls")
-    enable_eval = st.checkbox("Enable LLM-as-a-Judge", value=True, help="Runs an independent automated evaluation step on the latest response.")
-    if st.button("🗑️️ Clear Chat History"):
+    enable_eval = st.checkbox("Enable LLM-as-a-Judge", value=True, help="Runs an automated quality evaluation on each response.")
+    if st.button("🗑 Clear Chat History"):
         st.session_state.chat_history = []
         st.rerun()
 
-# 7. Render Historical Chat Feed
+# 8. Render Existing Chat Feed
 for role, message in st.session_state.chat_history:
     if role == "human":
         with st.chat_message("user"):
@@ -198,17 +201,15 @@ for role, message in st.session_state.chat_history:
         with st.chat_message("assistant"):
             st.markdown(message)
 
-# 8. Chat Input and Guarded Execution Lifecycle
+# 9. Process User Input
 user_query = st.chat_input("Ask a technical specification question...")
 
 if user_query:
-    # Validate and sanitize input
     is_valid, validated_query = sanitize_and_check_input(user_query)
     
     if not is_valid:
         st.warning(validated_query)
     else:
-        # Render user query immediately
         with st.chat_message("user"):
             st.markdown(validated_query)
             
@@ -216,9 +217,9 @@ if user_query:
         
         with st.chat_message("assistant"):
             message_placeholder = st.empty()
-            with st.spinner("Thinking..."):
+            with st.spinner("Processing technical prompt..."):
                 try:
-                    # Keep last 3 dialogue turns (6 messages) to fit Groq TPM limits
+                    # Truncate memory context to fit Groq API limits
                     recent_history = st.session_state.chat_history[-6:]
                     langchain_history = []
                     for role, text in recent_history:
@@ -227,7 +228,6 @@ if user_query:
                         elif role == "ai":
                             langchain_history.append(AIMessage(content=text))
 
-                    # Execute agent pipeline
                     response = agent_engine.invoke({
                         "input": validated_query,
                         "chat_history": langchain_history
@@ -236,22 +236,20 @@ if user_query:
                     output_text = response["output"]
                     message_placeholder.markdown(output_text)
                     
-                    # Optional QA Evaluation Step
                     if enable_eval:
                         st.markdown("---")
                         st.markdown("**⚖️ Real-time QA Evaluation:**")
                         score_card = run_llm_judge(validated_query, output_text, st.session_state.last_retrieved_context)
                         st.code(score_card, language="text")
 
-                    # Commit to history
                     st.session_state.chat_history.append(("human", validated_query))
                     st.session_state.chat_history.append(("ai", output_text))
 
                 except Exception as e:
                     err_msg = str(e)
                     if "rate_limit_exceeded" in err_msg or "413" in err_msg:
-                        st.error("⏳ **Rate Limit / Token Cap Exceeded**: Payload exceeded Groq limits. Clear history or wait 60 seconds.")
+                        st.error("⏳ **Rate Limit Exceeded**: Request payload exceeded Groq limits. Clear chat history or wait 60 seconds.")
                     elif "APIKey" in err_msg or "authentication" in err_msg.lower():
-                        st.error("🔑 **Authentication Error**: Groq API Key invalid/missing. Check secrets.")
+                        st.error("🔑 **Authentication Error**: Groq API Key invalid or missing. Verify environment secrets.")
                     else:
                         st.error(f"❌ **System Error**: {err_msg}")
