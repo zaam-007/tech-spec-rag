@@ -166,4 +166,94 @@ def run_llm_judge(query, response, context):
 target_pdf = "document.pdf"
 
 if not os.path.exists(target_pdf):
-    st.error(f"❌ '{target_pdf}' not found! Please
+    st.error(f"❌ '{target_pdf}' not found! Please drop your technical manual PDF into your project folder and rename it to '{target_pdf}'.")
+    st.stop()
+
+# Initialize persistent memory structures
+if "chat_history" not in st.session_state:
+    st.session_state.chat_history = []
+if "last_retrieved_context" not in st.session_state:
+    st.session_state.last_retrieved_context = "No document context called yet."
+
+try:
+    agent_engine = build_agentic_pipeline(target_pdf)
+except Exception as e:
+    st.error(f"Failed to compile RAG pipeline: {e}")
+    st.stop()
+
+# 6. Build Sidebar Controls
+with st.sidebar:
+    st.markdown("### 📊 Judge Controls")
+    enable_eval = st.checkbox("Enable LLM-as-a-Judge", value=True, help="Runs an independent automated evaluation step on the latest response.")
+    if st.button("🗑️️ Clear Chat History"):
+        st.session_state.chat_history = []
+        st.rerun()
+
+# 7. Render Historical Chat Feed
+for role, message in st.session_state.chat_history:
+    if role == "human":
+        with st.chat_message("user"):
+            st.markdown(message)
+    elif role == "ai":
+        with st.chat_message("assistant"):
+            st.markdown(message)
+
+# 8. Chat Input and Guarded Execution Lifecycle
+user_query = st.chat_input("Ask a technical specification question...")
+
+if user_query:
+    # Validate and sanitize input
+    is_valid, validated_query = sanitize_and_check_input(user_query)
+    
+    if not is_valid:
+        st.warning(validated_query)
+    else:
+        # Render user query immediately
+        with st.chat_message("user"):
+            st.markdown(validated_query)
+            
+        st.session_state.last_retrieved_context = "No document context called yet (Web Fallback applied)."
+        
+        with st.chat_message("assistant"):
+            message_placeholder = st.empty()
+            with st.spinner("Thinking..."):
+                try:
+                    # Keep last 3 dialogue turns (6 messages) to fit Groq TPM limits
+                    recent_history = st.session_state.chat_history[-6:]
+                    langchain_history = []
+                    for role, text in recent_history:
+                        if role == "human":
+                            langchain_history.append(HumanMessage(content=text))
+                        elif role == "ai":
+                            langchain_history.append(AIMessage(content=text))
+
+                    # Execute agent pipeline
+                    response = agent_engine.invoke({
+                        "input": validated_query,
+                        "chat_history": langchain_history
+                    })
+                    
+                    output_text = response["output"]
+                    message_placeholder.markdown(output_text)
+                    
+                    # Optional QA Evaluation Step
+                    if enable_eval:
+                        st.markdown("---")
+                        st.markdown("**⚖️ Real-time QA Evaluation:**")
+                        score_card = run_llm_judge(validated_query, output_text, st.session_state.last_retrieved_context)
+                        st.code(score_card, language="text")
+
+                    # Commit to history
+                    st.session_state.chat_history.append(("human", validated_query))
+                    st.session_state.chat_history.append(("ai", output_text))
+
+                except Exception as e:
+                    err_msg = str(e)
+                    if "rate_limit_exceeded" in err_msg or "413" in err_msg:
+                        st.error("⏳ **Rate Limit / Token Cap Exceeded**: Payload exceeded Groq limits. Clear history or wait 60 seconds.")
+                    elif "APIKey" in err_msg or "authentication" in err_msg.lower():
+                        st.error("🔑 **Authentication Error**: Groq API Key invalid/missing. Check secrets.")
+                    else:
+                        st.error(f"❌ **System Error**: {err_msg}")
+
+```
