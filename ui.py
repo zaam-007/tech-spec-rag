@@ -255,5 +255,3 @@ if user_query:
                         st.error("🔑 **Authentication Error**: Groq API Key invalid/missing. Check secrets.")
                     else:
                         st.error(f"❌ **System Error**: {err_msg}")
-
-```
