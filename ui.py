@@ -4,10 +4,9 @@ from dotenv import load_dotenv
 import streamlit as st
 
 from langchain_groq import ChatGroq
-from langchain_community.document_loaders import PyPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import Chroma
-from langchain_huggingface import HuggingFaceEmbeddings
+from langchain_community.embeddings import FastEmbedEmbeddings
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.output_parsers import StrOutputParser
 from langchain_classic.agents import AgentExecutor, create_tool_calling_agent
@@ -50,14 +49,12 @@ def sanitize_and_check_input(query: str) -> tuple[bool, str]:
             
     return True, clean_query
 
+
 # 3. Cache the Core Agent and Retrievers
 @st.cache_resource
 def build_agentic_pipeline(pdf_path):
     import pymupdf4llm
     from langchain_core.documents import Document
-    from langchain_text_splitters import RecursiveCharacterTextSplitter
-    from langchain_community.vectorstores import Chroma
-    from langchain_community.embeddings import FastEmbedEmbeddings
     from langchain_classic.retrievers import ContextualCompressionRetriever
     from langchain_community.document_compressors import FlashrankRerank
 
@@ -73,10 +70,10 @@ def build_agentic_pipeline(pdf_path):
     )
     splits = text_splitter.split_documents(docs)
     
-    # 3. FAST EMBEDDINGS (No PyTorch, ONNX engine)
+    # 3. Fast ONNX Embeddings (No PyTorch runtime required)
     embeddings = FastEmbedEmbeddings(model_name="BAAI/bge-small-en-v1.5")
 
-    # 4. IN-MEMORY CHROMADB (Fixes the infinite loading / SQLite thread lock issue)
+    # 4. In-Memory Chroma Vector Store (Prevents SQLite thread locking in Streamlit)
     vectorstore = Chroma.from_documents(
         documents=splits, 
         embedding=embeddings
@@ -135,9 +132,11 @@ def build_agentic_pipeline(pdf_path):
     agent = create_tool_calling_agent(llm, tools, prompt)
     return AgentExecutor(agent=agent, tools=tools, verbose=True)
 
+
 # 4. Helper Function: Run Real-time LLM Evaluation
 def run_llm_judge(query, response, context):
-    eval_llm = ChatGroq(groq_api_key=st.secrets.get("groq_api_key") or os.getenv("GROQ_API_KEY"), model_name="llama-3.1-8b-instant")
+    eval_api_key = os.getenv("GROQ_API_KEY") or st.secrets.get("groq_api_key")
+    eval_llm = ChatGroq(groq_api_key=eval_api_key, model_name="llama-3.3-70b-versatile")
     
     # Truncate context to prevent token limit overflows
     safe_context = context[:8000] + "\n...[Context truncated for token limits]..." if len(context) > 8000 else context
@@ -162,96 +161,9 @@ def run_llm_judge(query, response, context):
     eval_chain = eval_prompt | eval_llm | StrOutputParser()
     return eval_chain.invoke({"query": query, "response": response, "context": safe_context})
 
+
 # 5. Pipeline Initialization
 target_pdf = "document.pdf"
 
 if not os.path.exists(target_pdf):
-    st.error(f"❌ '{target_pdf}' not found! Please drop your technical manual PDF into your project folder and rename it to '{target_pdf}'.")
-    st.stop()
-
-# Initialize persistent memory structures
-if "chat_history" not in st.session_state:
-    st.session_state.chat_history = []
-if "last_retrieved_context" not in st.session_state:
-    st.session_state.last_retrieved_context = "No document context called yet."
-
-try:
-    agent_engine = build_agentic_pipeline(target_pdf)
-except Exception as e:
-    st.error(f"Failed to compile RAG pipeline: {e}")
-    st.stop()
-
-# 6. Build Sidebar Controls
-with st.sidebar:
-    st.markdown("### 📊 Judge Controls")
-    enable_eval = st.checkbox("Enable LLM-as-a-Judge", value=True, help="Runs an independent automated evaluation step on the latest response.")
-    if st.button("🗑️ Clear Chat History"):
-        st.session_state.chat_history = []
-        st.rerun()
-
-# 7. Render Historical Chat Feed
-for role, message in st.session_state.chat_history:
-    if role == "human":
-        with st.chat_message("user"):
-            st.markdown(message)
-    elif role == "ai":
-        with st.chat_message("assistant"):
-            st.markdown(message)
-
-# 8. Chat Input and Guarded Execution Lifecycle
-user_query = st.chat_input("Ask a technical specification question...")
-
-if user_query:
-    # Validate and sanitize input
-    is_valid, validated_query = sanitize_and_check_input(user_query)
-    
-    if not is_valid:
-        st.warning(validated_query)
-    else:
-        # Render user query immediately
-        with st.chat_message("user"):
-            st.markdown(validated_query)
-            
-        st.session_state.last_retrieved_context = "No document context called yet (Web Fallback applied)."
-        
-        with st.chat_message("assistant"):
-            message_placeholder = st.empty()
-            with st.spinner("Thinking..."):
-                try:
-                    # Keep last 3 dialogue turns (6 messages) to fit Groq TPM limits
-                    recent_history = st.session_state.chat_history[-6:]
-                    langchain_history = []
-                    for role, text in recent_history:
-                        if role == "human":
-                            langchain_history.append(HumanMessage(content=text))
-                        elif role == "ai":
-                            langchain_history.append(AIMessage(content=text))
-
-                    # Execute agent pipeline
-                    response = agent_engine.invoke({
-                        "input": validated_query,
-                        "chat_history": langchain_history
-                    })
-                    
-                    output_text = response["output"]
-                    message_placeholder.markdown(output_text)
-                    
-                    # Optional QA Evaluation Step
-                    if enable_eval:
-                        st.markdown("---")
-                        st.markdown("**⚖️ Real-time QA Evaluation:**")
-                        score_card = run_llm_judge(validated_query, output_text, st.session_state.last_retrieved_context)
-                        st.code(score_card, language="text")
-
-                    # Commit to history
-                    st.session_state.chat_history.append(("human", validated_query))
-                    st.session_state.chat_history.append(("ai", output_text))
-
-                except Exception as e:
-                    err_msg = str(e)
-                    if "rate_limit_exceeded" in err_msg or "413" in err_msg:
-                        st.error("⏳ **Rate Limit / Token Cap Exceeded**: Payload exceeded Groq limits. Clear history or wait 60 seconds.")
-                    elif "APIKey" in err_msg or "authentication" in err_msg.lower():
-                        st.error("🔑 **Authentication Error**: Groq API Key invalid/missing. Check secrets.")
-                    else:
-                        st.error(f"❌ **System Error**: {err_msg}")
+    st.error(f"❌ '{target_pdf}' not found! Please
